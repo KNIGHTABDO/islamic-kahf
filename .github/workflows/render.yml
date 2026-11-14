@@ -1,0 +1,106 @@
+name: Render
+on:
+  workflow_dispatch:
+    inputs:
+      comp:
+        description: 'Composition id, e.g. ch01 or short-ch01-a'
+        default: 'ch01'
+      shards:
+        description: 'Parallel render workers, max 40'
+        default: '30'
+permissions:
+  contents: read
+  actions: read
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+      frames: ${{ steps.m.outputs.frames }}
+      k: ${{ steps.m.outputs.k }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: m
+        env:
+          COMP: ${{ inputs.comp }}
+          SHARDS: ${{ inputs.shards }}
+        run: |
+          F=$(node tools/frames.mjs "$COMP")
+          K=$SHARDS; [ "$K" -gt 40 ] && K=40; M=$((F/30)); [ "$M" -lt 1 ] && M=1; [ "$K" -gt "$M" ] && K=$M
+          echo "frames=$F" >> "$GITHUB_OUTPUT"; echo "k=$K" >> "$GITHUB_OUTPUT"
+          echo "matrix=$(python3 -c "import json;print(json.dumps(list(range($K))))")" >> "$GITHUB_OUTPUT"
+          echo "$F frames over $K shards"
+  shard:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        i: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Render frame slice
+        env:
+          I: ${{ matrix.i }}
+          K: ${{ needs.plan.outputs.k }}
+          N: ${{ needs.plan.outputs.frames }}
+          COMP: ${{ inputs.comp }}
+        run: |
+          RANGE=$(python3 -c "import os;n=int(os.environ['N']);k=int(os.environ['K']);i=int(os.environ['I']);print(f'{n*i//k}-{n*(i+1)//k-1}')")
+          echo "frames $RANGE of $N"
+          npx remotion render src/index.ts "$COMP" "out/chunk_$(printf %02d $I).mp4" --frames="$RANGE" --muted \
+            --gl=swangle --concurrency=$(nproc) --codec=h264 --crf=14 --pixel-format=yuv420p 2>&1 | tr '\r' '\n' | grep -vE '^\s*$' | tail -5
+          ls -la out/chunk_*.mp4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chunk-${{ matrix.i }}
+          path: out/chunk_*.mp4
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
+  join:
+    needs: shard
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      COMP: ${{ inputs.comp }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null
+      - name: Render audio mix
+        run: npx remotion render src/index.ts "$COMP" out/mix.wav --codec=wav 2>&1 | tr '\r' '\n' | grep -vE '^\s*$' | tail -3
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: chunk-*
+          path: chunks
+          merge-multiple: true
+      - name: Join chunks and audio, plus a 720p copy for phone review
+        run: |
+          ls chunks/*.mp4 | sort | sed "s|^|file '$PWD/|;s|$|'|" > list.txt
+          ffmpeg -nostdin -v error -y -f concat -safe 0 -i list.txt -i out/mix.wav -map 0:v -map 1:a -c:v copy \
+            -c:a aac -b:a 256k -ar 48000 -shortest -movflags +faststart "out/$COMP.mp4"
+          ffmpeg -nostdin -v error -y -i "out/$COMP.mp4" -vf scale=-2:720 -c:v libx264 -crf 26 -preset veryfast -c:a aac -b:a 128k -movflags +faststart "out/${COMP}_720p.mp4"
+          ffprobe -v error -show_entries format=duration:stream=codec_type,width,height -of compact "out/$COMP.mp4"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.comp }}-final
+          path: out/${{ inputs.comp }}.mp4
+          compression-level: 0
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.comp }}-720p
+          path: out/${{ inputs.comp }}_720p.mp4
+          compression-level: 0
+          retention-days: 30

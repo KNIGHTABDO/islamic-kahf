@@ -1,0 +1,158 @@
+import React from 'react';
+import {AbsoluteFill, Audio, Easing, Img, Loop, OffthreadVideo, Sequence, interpolate, staticFile, useCurrentFrame, useVideoConfig} from 'remotion';
+import {loadFont as loadRuqaa} from '@remotion/google-fonts/ArefRuqaa';
+import {loadFont as loadAmiri} from '@remotion/google-fonts/Amiri';
+import {loadFont as loadQuran} from '@remotion/google-fonts/AmiriQuran';
+import {ParallaxStill} from './Parallax';
+import {Dust, Grain, Overlays, Vignette} from './fx';
+import type {Chapter, Location as Loc, Shot, Verse} from './types';
+
+export const {fontFamily: RUQAA} = loadRuqaa();
+export const {fontFamily: AMIRI} = loadAmiri();
+export const {fontFamily: QURAN} = loadQuran();
+export const FPS = 30;
+const XF = 0.3; // crossfade seconds between shots
+export const GOLD = 'linear-gradient(180deg, #fff1c9 0%, #e8b65a 55%, #9c6a22 100%)';
+const clamp = {extrapolateLeft: 'clamp', extrapolateRight: 'clamp'} as const;
+const ease = Easing.bezier(0.45, 0, 0.55, 1);
+const lerp = (r: [number, number], p: number) => r[0] + (r[1] - r[0]) * p;
+const dirOf = (p: string) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/') + 1) : '');
+export const depthOf = (p: string) => dirOf(p) + 'd_' + p.slice(p.lastIndexOf('/') + 1).replace(/\.\w+$/, '.png');
+
+export const ShotView: React.FC<{s: Shot; first?: boolean}> = ({s, first}) => {
+  const f = useCurrentFrame();
+  const p = interpolate(f, [0, (s.t1 - s.t0 + XF) * FPS], [0, 1], {...clamp, easing: ease});
+  const kb = s.kb ?? {s: [1.0, 1.06], x: [0, 0], y: [0, 0]};
+  const media = {width: '100%', height: '100%', objectFit: 'cover' as const};
+  const vid = <OffthreadVideo src={staticFile(s.src)} muted playbackRate={s.loop ? 1 : s.rate ?? 1} style={media} />;
+  return (
+    <AbsoluteFill style={{opacity: first ? 1 : interpolate(f, [0, XF * FPS], [0, 1], clamp)}}>
+      <AbsoluteFill style={{transform: `translate(${lerp(kb.x, p)}%, ${lerp(kb.y, p)}%) scale(${lerp(kb.s, p)})`, filter: s.grade}}>
+        {s.video ? (s.loop && s.clipDur ? <Loop durationInFrames={Math.max(1, Math.floor(s.clipDur * FPS))}>{vid}</Loop> : vid)
+          : s.par ? <ParallaxStill src={s.src} depth={depthOf(s.src)} dx={lerp(s.par.x, p)} dy={lerp(s.par.y, p)} />
+          : <Img src={staticFile(s.src)} style={media} />}
+      </AbsoluteFill>
+      <Overlays fx={s.fx} />
+    </AbsoluteFill>
+  );
+};
+
+// Ruq'ah location card: right-to-left ink wipe + growing gold rule.
+const LocationCard: React.FC<{l: Loc}> = ({l}) => {
+  const f = useCurrentFrame();
+  const d = (l.dur ?? 3.3) * FPS;
+  const out = interpolate(f, [d - 16, d], [1, 0], clamp);
+  return (<>
+    <div style={{position: 'absolute', top: 0, right: 0, width: 900, height: 330, opacity: out * 0.85,
+      background: 'radial-gradient(ellipse at 85% 30%, rgba(0,0,0,0.75), rgba(0,0,0,0) 65%)'}} />
+    <div style={{position: 'absolute', top: 70, right: 90, direction: 'rtl', textAlign: 'right', opacity: out}}>
+      <div style={{fontFamily: RUQAA, fontSize: 78, color: '#f4e6c4', lineHeight: 1.25, textShadow: '0 3px 14px rgba(0,0,0,0.85)',
+        clipPath: `inset(0 0 0 ${interpolate(f, [0, 28], [100, 0], {...clamp, easing: Easing.out(Easing.cubic)})}%)`}}>{l.title}</div>
+      <div style={{height: 3, marginLeft: 'auto', background: 'linear-gradient(to left, #d9a94a, rgba(217,169,74,0))',
+        width: `${interpolate(f, [10, 40], [0, 100], {...clamp, easing: Easing.out(Easing.cubic)})}%`}} />
+      {l.sub && <div style={{fontFamily: AMIRI, fontSize: 34, color: '#d9c7a0', marginTop: 8, textShadow: '0 2px 10px rgba(0,0,0,0.9)',
+        opacity: interpolate(f, [24, 40], [0, 1], clamp)}}>{l.sub}</div>}
+    </div></>);
+};
+
+export const Subtitles: React.FC<{c: Chapter; size?: number; bottom?: number}> = ({c, size = 52, bottom = 78}) => {
+  const t = useCurrentFrame() / FPS - c.narrAt;
+  const cur = c.lines.find(([a, b]) => t >= a - 0.1 && t <= b + 0.35);
+  if (!cur) return null;
+  const [a, b, txt] = cur;
+  const o = Math.min(interpolate(t, [a - 0.1, a + 0.12], [0, 1], clamp), interpolate(t, [b + 0.15, b + 0.35], [1, 0], clamp));
+  return <div style={{position: 'absolute', bottom, width: '100%', padding: '0 40px', boxSizing: 'border-box', textAlign: 'center', direction: 'rtl', opacity: o}}>
+    <span style={{fontFamily: AMIRI, fontSize: size, color: '#fbf3e2', fontWeight: 700, textShadow: '0 0 4px #000, 0 3px 12px rgba(0,0,0,0.95)'}}>{txt}</span>
+  </div>;
+};
+
+// Qur'an verse card: exact Uthmani text + reference while the real recitation plays. Never TTS, never subtitled.
+// Tanzil/alquran.cloud text puts waqf signs (U+06D6-U+06DC) after a space; a mark with no base letter renders as a box.
+// Attach each one to the word before it, for display only (the stored text stays exact).
+const quranDisplay = (t: string) => t.replace(/ ([\u06D6-\u06DC])/g, '$1');
+
+const VerseCard: React.FC<{v: Verse}> = ({v}) => {
+  const f = useCurrentFrame();
+  const d = (v.b - v.a) * FPS;
+  const o = Math.min(interpolate(f, [0, 12], [0, 1], clamp), interpolate(f, [d - 8, d + 6], [1, 0], clamp));
+  const words = v.text.split(/\s+/).length;
+  const size = words > 40 ? 46 : words > 24 ? 56 : words > 12 ? 66 : 78;
+  return (
+    <AbsoluteFill style={{opacity: o}}>
+      <AbsoluteFill style={{background: 'radial-gradient(ellipse at center, rgba(5,8,20,0.82) 0%, rgba(5,8,20,0.9) 100%)'}} />
+      <AbsoluteFill style={{alignItems: 'center', justifyContent: 'center', padding: '0 170px'}}>
+        <div style={{fontFamily: QURAN, fontSize: size, lineHeight: 1.9, color: '#f6e7c1', direction: 'rtl', textAlign: 'center',
+          textShadow: '0 0 18px rgba(232,182,90,0.35)'}}>{quranDisplay(v.text)}</div>
+        <div style={{height: 2, width: 260, margin: '26px 0 14px', background: 'linear-gradient(to right, rgba(217,169,74,0), #d9a94a, rgba(217,169,74,0))'}} />
+        <div style={{fontFamily: AMIRI, fontSize: 34, color: '#cdb98e', direction: 'rtl'}}>{v.ref}</div>
+      </AbsoluteFill>
+    </AbsoluteFill>
+  );
+};
+
+export const TitleCard: React.FC<{c: Chapter}> = ({c}) => {
+  const f = useCurrentFrame();
+  const d = c.titleDur * FPS;
+  const o = interpolate(f, [0, 24], [0, 1], clamp);
+  return (
+    <AbsoluteFill style={{background: '#050403', opacity: interpolate(f, [d - 29, d], [1, 0], clamp)}}>
+      <AbsoluteFill style={{opacity: 0.28 * o}}>
+        <Img src={staticFile(c.titleBg)} style={{width: '100%', height: '100%', objectFit: 'cover', filter: 'blur(8px) brightness(0.6)'}} />
+      </AbsoluteFill>
+      <Dust n={60} />
+      <AbsoluteFill style={{alignItems: 'center', justifyContent: 'center', opacity: o, direction: 'rtl',
+        transform: `scale(${interpolate(f, [0, 150], [1.12, 1.0], {...clamp, easing: Easing.out(Easing.cubic)})})`}}>
+        {c.label && <div style={{fontFamily: AMIRI, fontSize: 44, color: '#d9c7a0', opacity: interpolate(f, [10, 30], [0, 1], clamp)}}>{c.label}</div>}
+        <div style={{fontFamily: RUQAA, fontSize: c.title.length > 14 ? 170 : 230, lineHeight: 1.3, background: GOLD, WebkitBackgroundClip: 'text',
+          backgroundClip: 'text', color: 'transparent', filter: `drop-shadow(0 0 ${18 + 10 * Math.sin(f / 12)}px rgba(232,182,90,0.55))`}}>{c.title}</div>
+        <div style={{fontFamily: AMIRI, fontSize: 40, color: '#cdb98e', marginTop: 10, opacity: interpolate(f, [30, 54], [0, 1], clamp)}}>{c.subtitle}</div>
+      </AbsoluteFill>
+    </AbsoluteFill>
+  );
+};
+
+const Outro: React.FC<{text: string; sub?: string; series: string}> = ({text, sub, series}) => {
+  const f = useCurrentFrame();
+  const o = interpolate(f, [0, 20], [0, 1], clamp);
+  return <AbsoluteFill style={{background: 'rgba(5,4,3,0.88)', opacity: o, alignItems: 'center', justifyContent: 'center', direction: 'rtl'}}>
+    <Dust n={50} />
+    <div style={{fontFamily: RUQAA, fontSize: 120, background: GOLD, WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent'}}>{text}</div>
+    {sub && <div style={{fontFamily: AMIRI, fontSize: 42, color: '#d9c7a0', marginTop: 12}}>{sub}</div>}
+    <div style={{fontFamily: AMIRI, fontSize: 34, color: '#9f8d68', marginTop: 40}}>{series}</div>
+  </AbsoluteFill>;
+};
+
+// Music level over the chapter: intro level before narration, low under narration, silent under every verse
+// (no music under Qur'an), up during swells and after the narration, fade out at the end.
+const musicVolume = (c: Chapter, frame: number, dur: number) => {
+  const L = c.musicLevels ?? {intro: 0.55, under: 0.28, swell: 0.6};
+  const t = frame / FPS, n = t - c.narrAt;
+  let v = t < c.narrAt ? interpolate(t, [0, 0.66, c.narrAt], [0, L.intro, L.under], clamp)
+    : interpolate(n, [c.narrDur, c.narrDur + 0.66], [L.under, L.swell], clamp);
+  for (const [a, b] of c.swells ?? []) v = Math.max(v, Math.min(interpolate(n, [a, a + 0.6], [L.under, L.swell], clamp), interpolate(n, [b - 0.6, b], [L.swell, L.under], clamp)));
+  for (const vs of c.verses) v *= 1 - Math.min(interpolate(n, [vs.a - 0.8, vs.a - 0.1], [0, 1], clamp), interpolate(n, [vs.b + 0.1, vs.b + 0.8], [1, 0], clamp));
+  return v * interpolate(frame, [dur - 30, dur], [1, 0], clamp);
+};
+
+export const Episode: React.FC<{c: Chapter; noAudio?: boolean; noSubs?: boolean}> = ({c, noAudio, noSubs}) => {
+  const {durationInFrames} = useVideoConfig();
+  const fr = (s: number) => Math.round(s * FPS);
+  return (
+    <AbsoluteFill style={{background: '#000'}}>
+      {c.shots.map((s, i) => {
+        const from = fr(i === 0 ? s.t0 : s.t0 - XF);
+        return <Sequence key={i} from={from} durationInFrames={fr(s.t1) - from + 1}><ShotView s={s} first={i === 0} /></Sequence>;
+      })}
+      {c.locations.map((l, i) => <Sequence key={'l' + i} from={fr(l.t)} durationInFrames={fr(l.dur ?? 3.3)}><LocationCard l={l} /></Sequence>)}
+      <Vignette />
+      <Grain />
+      {c.verses.map((v, i) => <Sequence key={'v' + i} from={fr(c.narrAt + v.a - 0.2)} durationInFrames={fr(v.b - v.a + 0.4)}><VerseCard v={v} /></Sequence>)}
+      {!noSubs && <Subtitles c={c} />}
+      <Sequence from={fr(c.titleAt)} durationInFrames={fr(c.titleDur)}><TitleCard c={c} /></Sequence>
+      {c.outro && <Sequence from={fr(c.outro.at)}><Outro text={c.outro.text} sub={c.outro.sub} series={c.series} /></Sequence>}
+      {!noAudio && <Sequence from={fr(c.narrAt)}><Audio src={staticFile(c.narration)} /></Sequence>}
+      {!noAudio && c.sfx && <Audio src={staticFile(c.sfx)} />}
+      {!noAudio && c.music && <Audio src={staticFile(c.music)} volume={(f) => musicVolume(c, f, durationInFrames)} />}
+    </AbsoluteFill>
+  );
+};

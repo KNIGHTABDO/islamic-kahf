@@ -1,0 +1,10 @@
+{
+  "model": "gemini-3.8-flash-tts",
+  "voice": "Cruz",
+  "temperature": 0.7,
+  "direction": "Read aloud in formal Modern Standard Arabic (Fusha) only, as a professional documentary narrator: warm, deep, close to the microphone, calm authority, steady medium pace, short pauses, slight dramatic weight on key words, falling tone at sentence ends. No dialect:",
+  "maxWords": 160,
+  "reciter": "Yasser_Ad-Dussary_128kbps",
+  "pauses": {"paragraph": 0.45, "verseBefore": 0.8, "verseAfter": 0.9, "betweenAyat": 0.35},
+  "titleDur": 5.3
+}
