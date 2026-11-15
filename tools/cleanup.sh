@@ -24,10 +24,10 @@ for t in "${targets[@]}"; do
   kb=$(du -sk "$t" | cut -f1); total=$((total + kb))
 done
 echo "Would free $((total / 1024)) MB:"
-for t in work out sfx_parts node_modules sources/quran/audio; do [ -e "$t" ] && echo "  $t"; done; echo "  audio/*/ wav+mp3 takes (json kept), public/*/*.wav"
+for t in work out sfx_parts node_modules sources/quran/audio; do if [ -e "$t" ]; then echo "  $t"; fi; done; echo "  audio/*/ wav+mp3 takes (json kept), public/*/*.wav"
 
 if [ "$YES" = "--yes" ]; then
-  for t in "${targets[@]}"; do [ -e "$t" ] && rm -rf -- "$t"; done
+  for t in "${targets[@]}"; do if [ -e "$t" ]; then rm -rf -- "$t"; fi; done
   echo "Done. Run 'npm install' before working on this project again."
 else
   echo "Dry run. Rerun with --yes to delete."
