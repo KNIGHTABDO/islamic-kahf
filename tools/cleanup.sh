@@ -24,7 +24,7 @@ for t in "${targets[@]}"; do
   kb=$(du -sk "$t" | cut -f1); total=$((total + kb))
 done
 echo "Would free $((total / 1024)) MB:"
-for t in work out sfx_parts node_modules sources/quran/audio audio public; do [ -e "$t" ] && echo "  $t"; done
+for t in work out sfx_parts node_modules sources/quran/audio; do [ -e "$t" ] && echo "  $t"; done; echo "  audio/*/ wav+mp3 takes (json kept), public/*/*.wav"
 
 if [ "$YES" = "--yes" ]; then
   for t in "${targets[@]}"; do [ -e "$t" ] && rm -rf -- "$t"; done
