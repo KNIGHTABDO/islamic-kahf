@@ -9,6 +9,9 @@ on:
       shards:
         description: 'Parallel render workers, max 40'
         default: '30'
+      scale:
+        description: '1 = 1080p, 2 = native 4K (3840x2160, final upload)'
+        default: '1'
 permissions:
   contents: read
   actions: read
@@ -52,11 +55,13 @@ jobs:
           K: ${{ needs.plan.outputs.k }}
           N: ${{ needs.plan.outputs.frames }}
           COMP: ${{ inputs.comp }}
+          SCALE: ${{ inputs.scale }}
         run: |
+          CRF=14; [ "$SCALE" != "1" ] && CRF=17
           RANGE=$(python3 -c "import os;n=int(os.environ['N']);k=int(os.environ['K']);i=int(os.environ['I']);print(f'{n*i//k}-{n*(i+1)//k-1}')")
           echo "frames $RANGE of $N"
           npx remotion render src/index.ts "$COMP" "out/chunk_$(printf %02d $I).mp4" --frames="$RANGE" --muted \
-            --gl=swangle --concurrency=$(nproc) --codec=h264 --crf=14 --pixel-format=yuv420p 2>&1 | tr '\r' '\n' | grep -vE '^\s*$' | tail -5
+            --gl=swangle --concurrency=$(nproc) --scale="$SCALE" --codec=h264 --crf=$CRF --pixel-format=yuv420p 2>&1 | tr '\r' '\n' | grep -vE '^\s*$' | tail -5
           ls -la out/chunk_*.mp4
       - uses: actions/upload-artifact@v4
         with:
