@@ -5,7 +5,7 @@ import {loadFont as loadAmiri} from '@remotion/google-fonts/Amiri';
 import {loadFont as loadQuran} from '@remotion/google-fonts/AmiriQuran';
 import {ParallaxStill} from './Parallax';
 import {Dust, Grain, Overlays, Vignette} from './fx';
-import type {Chapter, Location as Loc, Shot, Verse} from './types';
+import type {Chapter, Credits as Cr, Location as Loc, Shot, Verse} from './types';
 
 export const {fontFamily: RUQAA} = loadRuqaa();
 export const {fontFamily: AMIRI} = loadAmiri();
@@ -122,6 +122,68 @@ const Outro: React.FC<{text: string; sub?: string; series: string}> = ({text, su
   </AbsoluteFill>;
 };
 
+// Movie-style end roll. Every block has a fixed height, so the roll's total height is known and it scrolls at one
+// constant speed; the end card fades in after the last block leaves and holds to the end.
+const CH = {head: 620, h: 190, row: 74, line: 66, gap: 120, endHold: 8};
+const Ornament: React.FC<{w?: number}> = ({w = 260}) => <div style={{display: 'flex', alignItems: 'center', gap: 18, justifyContent: 'center'}}>
+  <div style={{width: w, height: 2, background: 'linear-gradient(90deg, transparent, #c9a45c)'}} />
+  <div style={{width: 12, height: 12, transform: 'rotate(45deg)', border: '2px solid #e2c27a'}} />
+  <div style={{width: w, height: 2, background: 'linear-gradient(270deg, transparent, #c9a45c)'}} />
+</div>;
+const Credits: React.FC<{k: Cr; series: string}> = ({k, series}) => {
+  const f = useCurrentFrame();
+  const {height: VH} = useVideoConfig();
+  const D = k.dur * FPS, hold = CH.endHold * FPS;
+  const H = (k.head ? CH.head : 0) + k.sections.reduce((a, s) => a + CH.h + (s.rows?.length ?? 0) * CH.row + (s.text?.length ?? 0) * CH.line + CH.gap, 0);
+  const rollEnd = D - hold;
+  const y = interpolate(f, [0, rollEnd], [VH, -H], clamp);
+  const endO = interpolate(f, [rollEnd - 20, rollEnd + 25], [0, 1], clamp) * interpolate(f, [D - 40, D - 2], [1, 0], clamp);
+  const bgO = interpolate(f, [0, 30], [0, 1], clamp);
+  const rowStyle: React.CSSProperties = {height: CH.row, display: 'flex', alignItems: 'center', direction: 'rtl', width: 1500};
+  return (
+    <AbsoluteFill style={{background: '#050403', opacity: bgO}}>
+      {k.bg && <AbsoluteFill style={{opacity: 0.22}}>
+        <Img src={staticFile(k.bg)} style={{width: '100%', height: '100%', objectFit: 'cover', filter: 'blur(14px) brightness(0.5) sepia(0.35)',
+          transform: `scale(${interpolate(f, [0, D], [1.08, 1.22])})`}} />
+      </AbsoluteFill>}
+      <Dust n={55} />
+      <AbsoluteFill style={{alignItems: 'center', opacity: interpolate(f, [rollEnd - 30, rollEnd], [1, 0], clamp)}}>
+        <div style={{position: 'absolute', top: 0, transform: `translateY(${y}px)`, display: 'flex', flexDirection: 'column', alignItems: 'center'}}>
+          {k.head && <div style={{height: CH.head, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', direction: 'rtl'}}>
+            {k.head.label && <div style={{fontFamily: AMIRI, fontSize: 40, color: '#cdb98e', letterSpacing: 2}}>{k.head.label}</div>}
+            <div style={{fontFamily: RUQAA, fontSize: 190, lineHeight: 1.35, background: GOLD, WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent',
+              filter: 'drop-shadow(0 0 22px rgba(232,182,90,0.45))'}}>{k.head.title}</div>
+            {k.head.sub && <div style={{fontFamily: AMIRI, fontSize: 44, color: '#e9dcbc', marginTop: 4}}>{k.head.sub}</div>}
+          </div>}
+          {k.sections.map((s, i) => <div key={i} style={{display: 'flex', flexDirection: 'column', alignItems: 'center', paddingBottom: CH.gap}}>
+            <div style={{height: CH.h, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14}}>
+              <div style={{fontFamily: RUQAA, fontSize: 76, lineHeight: 1.2, background: GOLD, WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent'}}>{s.h}</div>
+              <Ornament />
+            </div>
+            {s.rows?.map(([role, name], j) => <div key={j} style={rowStyle}>
+              <div style={{flex: 1, textAlign: 'left', paddingLeft: 40, fontFamily: AMIRI, fontSize: 34, color: '#cdb98e', direction: 'rtl', order: 0}}>{role}</div>
+              <div style={{width: 2, height: 30, background: 'rgba(201,164,92,0.45)', order: 1}} />
+              <div style={{flex: 1, textAlign: 'right', paddingRight: 40, fontFamily: AMIRI, fontSize: 40, color: '#fbf3e2', fontWeight: 700, direction: 'rtl', order: 2}}>{name}</div>
+            </div>)}
+            {s.text?.map((t, j) => <div key={j} style={{height: CH.line, display: 'flex', alignItems: 'center', fontFamily: AMIRI, fontSize: 38,
+              color: '#e9dcbc', direction: 'rtl', textAlign: 'center'}}>{t}</div>)}
+          </div>)}
+        </div>
+      </AbsoluteFill>
+      {k.end && <AbsoluteFill style={{alignItems: 'center', justifyContent: 'center', direction: 'rtl', opacity: endO,
+        transform: `scale(${interpolate(f, [rollEnd - 20, D], [1.06, 1.0], clamp)})`}}>
+        <div style={{fontFamily: RUQAA, fontSize: 150, lineHeight: 1.3, background: GOLD, WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent',
+          filter: `drop-shadow(0 0 ${18 + 8 * Math.sin(f / 14)}px rgba(232,182,90,0.5))`}}>{k.end.text}</div>
+        <div style={{marginTop: 18}}><Ornament w={200} /></div>
+        <div style={{fontFamily: AMIRI, fontSize: 44, color: '#e9dcbc', marginTop: 22}}>{k.end.sub ?? series}</div>
+        {k.end.small && <div style={{fontFamily: AMIRI, fontSize: 30, color: '#9f8d68', marginTop: 30}}>{k.end.small}</div>}
+      </AbsoluteFill>}
+      <Vignette />
+      <Grain />
+    </AbsoluteFill>
+  );
+};
+
 // Music level over the chapter: intro level before narration, low under narration, silent under every verse
 // (no music under Qur'an), up during swells and after the narration, fade out at the end.
 const musicVolume = (c: Chapter, frame: number, dur: number) => {
@@ -131,7 +193,7 @@ const musicVolume = (c: Chapter, frame: number, dur: number) => {
     : interpolate(n, [c.narrDur, c.narrDur + 0.66], [L.under, L.swell], clamp);
   for (const [a, b] of c.swells ?? []) v = Math.max(v, Math.min(interpolate(n, [a, a + 0.6], [L.under, L.swell], clamp), interpolate(n, [b - 0.6, b], [L.swell, L.under], clamp)));
   for (const vs of c.verses) v *= 1 - Math.min(interpolate(n, [vs.a - 0.8, vs.a - 0.1], [0, 1], clamp), interpolate(n, [vs.b + 0.1, vs.b + 0.8], [1, 0], clamp));
-  return v * interpolate(frame, [dur - 30, dur], [1, 0], clamp);
+  return v * interpolate(frame, [dur - (c.credits ? 120 : 30), dur], [1, 0], clamp);
 };
 
 export const Episode: React.FC<{c: Chapter; noAudio?: boolean; noSubs?: boolean}> = ({c, noAudio, noSubs}) => {
@@ -150,6 +212,7 @@ export const Episode: React.FC<{c: Chapter; noAudio?: boolean; noSubs?: boolean}
       {!noSubs && <Subtitles c={c} />}
       <Sequence from={fr(c.titleAt)} durationInFrames={fr(c.titleDur)}><TitleCard c={c} /></Sequence>
       {c.outro && <Sequence from={fr(c.outro.at)}><Outro text={c.outro.text} sub={c.outro.sub} series={c.series} /></Sequence>}
+      {c.credits && <Sequence from={fr(c.credits.at)}><Credits k={c.credits} series={c.series} /></Sequence>}
       {!noAudio && <Sequence from={fr(c.narrAt)}><Audio src={staticFile(c.narration)} /></Sequence>}
       {!noAudio && c.sfx && <Audio src={staticFile(c.sfx)} />}
       {!noAudio && c.music && <Audio src={staticFile(c.music)} volume={(f) => musicVolume(c, f, durationInFrames)} />}

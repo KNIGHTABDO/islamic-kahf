@@ -40,6 +40,10 @@ if plan.get('outro'):
     o = plan['outro']; oat = A(o) if 'at' in o else round(NA + ND + 0.6 if L['titleGap'] is not None else TITLE + TD, 2)
     outro = {'at': oat, 'text': o['text'], **({'sub': o['sub']} if o.get('sub') else {})}
 if outro: TOTAL = round(outro['at'] + plan['outro'].get('dur', 4.5), 2)
+credits = None
+if plan.get('credits'):   # movie-style end roll after the outro card (overlaps its last second)
+    credits = {k: v for k, v in plan['credits'].items() if k != 'stats'}; credits['at'] = round(TOTAL - 1.0, 2)
+    credits['dur'] = plan['credits'].get('dur', 45); TOTAL = round(credits['at'] + credits['dur'], 2)
 elif L['titleGap'] is not None: TOTAL = round(NA + ND + plan.get('tail', 2.0), 2)
 else: TOTAL = round(TITLE + TD, 2)
 
@@ -71,12 +75,20 @@ if plan.get('titleSfx', True):
 cues = [q for q in cues if 0 <= q['t'] < TOTAL]; cues.sort(key=lambda q: q['t'])
 swells = list(L['swells']) + ([[L['titleGap'], round(L['titleGap'] + TD, 2)]] if L['titleGap'] is not None else [])
 
+if credits and plan['credits'].get('stats'):   # "details of the work", counted from the build itself
+    ar = lambda n: str(n).translate(str.maketrans('0123456789', '٠١٢٣٤٥٦٧٨٩'))
+    stills = {sh['src'] for sh in shots if not sh.get('video')}
+    credits['sections'] = credits.get('sections', []) + [{'h': 'أرقام العمل', 'rows': [
+        ['مدة الفصل', f'{ar(round(ND / 60))} دقيقة'], ['الآيات المتلوّة', ar(len(L['verses']))],
+        ['اللوحات المرسومة', ar(len(stills))], ['اللقطات', ar(len(shots))],
+        ['المقاطع المتحركة', ar(sum(1 for sh in shots if sh.get('video')))],
+        ['سطور الترجمة', ar(len(L['lines']))], ['التصيير', f"{ar(plan['credits'].get('workers', 40))} خادمًا متوازيًا"]]}]
 C = {'id': ch, 'series': plan.get('series', 'صندوق الحكايات'), 'title': plan['title'], 'subtitle': plan['subtitle'],
      **({'label': plan['label']} if plan.get('label') else {}), 'titleBg': plan['titleBg'],
      'titleAt': TITLE, 'titleDur': TD, 'total': TOTAL, 'narrAt': NA, 'narrDur': ND, 'narration': f'{ch}/narration.mp3',
      **({'sfx': f'{ch}/sfx.mp3'} if not a.no_sfx else {}),
      **({'music': plan['music'], 'musicLevels': plan.get('musicLevels', {'intro': 0.55, 'under': 0.28, 'swell': 0.6})} if plan.get('music') else {}),
-     'swells': swells, **({'outro': outro} if outro else {}), **({'thumb': plan['thumb']} if plan.get('thumb') else {}),
+     'swells': swells, **({'outro': outro} if outro else {}), **({'credits': credits} if credits else {}), **({'thumb': plan['thumb']} if plan.get('thumb') else {}),
      'shots': shots, 'lines': L['lines'], 'verses': L['verses'], 'locations': locs, 'cues': cues}
 json.dump(C, open(f'src/chapters/{ch}.json', 'w', encoding='utf8'), ensure_ascii=False, indent=1)
 

@@ -36,43 +36,61 @@ def speech_chunks(f):
 PUNCT = r'[\.،,!\?؟:…؛]'
 def weight(p): return len(re.sub(r'[\s\.،,!\?؟:…؛"«»]', '', p)) + 2
 
-def align(f, text):
-    """DP: contiguous script phrases -> contiguous speech chunks (each group <= 3 chunks, <= 6 phrases)."""
+def align(f, text, anchors=None):
+    """DP: contiguous script phrases -> contiguous speech chunks (each group <= 6 chunks, <= 6 phrases).
+    Spanning a pause costs more the longer the pause (quick breaths inside a sentence are cheap)."""
     phrases = [p.strip() for p in re.split(r'(?<=[\.،,!\?؟:…؛])\s+|\n+', text) if p.strip()]
     chunks = speech_chunks(f); W = [weight(p) for p in phrases]; Pn, N = len(phrases), len(chunks)
     rate = sum(W) / max(1e-6, sum(b - a for a, b in chunks)); INF = float('inf')
     best = [[INF] * (N + 1) for _ in range(Pn + 1)]; back = [[None] * (N + 1) for _ in range(Pn + 1)]; best[0][0] = 0
     for j in range(1, N + 1):
         for i in range(1, Pn + 1):
-            for m in range(max(0, j - 3), j):
+            for m in range(max(0, j - 6), j):
                 speech = sum(c[1] - c[0] for c in chunks[m:j])
                 for k in range(max(0, i - 6), i):
                     if best[k][m] == INF: continue
-                    c = best[k][m] + (sum(W[k:i]) / rate - speech) ** 2 / max(speech, 0.3) + 0.9 * (j - m - 1)
+                    gaps = sum(0.15 + 1.5 * (chunks[x + 1][0] - chunks[x][1]) for x in range(m, j - 1))
+                    c = best[k][m] + (sum(W[k:i]) / rate - speech) ** 2 / max(speech, 0.3) + gaps
+                    if anchors and anchors[k] is not None: c += 0.6 * min((chunks[m][0] - anchors[k]) ** 2, 9.0)  # Gemini phrase start
                     if c < best[i][j]: best[i][j] = c; back[i][j] = (k, m)
     if best[Pn][N] == INF:
         print(f'  ! alignment failed for {f} ({Pn} phrases, {N} speech chunks): falling back to proportional timing')
         tot = sum(W); s0 = chunks[0][0] if chunks else 0.0; e0 = chunks[-1][1] if chunks else dur(f); out = []; t0 = s0
-        for p, w in zip(phrases, W): d = (e0 - s0) * w / tot; out.append((t0, t0 + d, p)); t0 += d
+        for p, w in zip(phrases, W): d = (e0 - s0) * w / tot; out.append(([(t0, t0 + d)], p)); t0 += d
         return out
     res, i, j = [], Pn, N
     while j > 0:
-        k, m = back[i][j]; res.append((chunks[m][0], chunks[j - 1][1], ' '.join(phrases[k:i]), sum(W[k:i]) / rate)); i, j = k, m
+        k, m = back[i][j]; res.append((chunks[m][0], chunks[j - 1][1], ' '.join(phrases[k:i]), sum(W[k:i]) / rate, chunks[m:j])); i, j = k, m
     res.reverse()
-    for s0, e0, t, exp in res:
+    for s0, e0, t, exp, _ in res:
         flag = '  <-- check' if abs((e0 - s0) - exp) > max(1.2, 0.45 * exp) else ''
         print(f'  {s0:7.2f}-{e0:7.2f} ({e0 - s0:4.1f}s exp {exp:4.1f}) {display(t)[:70]}{flag}')
-    return [(s0, e0, t) for s0, e0, t, _ in res]
+    return [(cs, t) for _, _, t, _, cs in res]
 
-def split_display(a0, b0, text, maxw=7):
-    words = display(text).split()
-    if len(words) <= maxw: return [(a0, b0, ' '.join(words))]
-    n = -(-len(words) // maxw); size = -(-len(words) // n)
-    groups = [words[i:i + size] for i in range(0, len(words), size)]
-    ws = [sum(len(w) + 1 for w in g) for g in groups]; tot = sum(ws); out, t = [], a0
-    for g, w in zip(groups, ws):
-        d = (b0 - a0) * w / tot; out.append((t, t + d, ' '.join(g))); t += d
-    return out
+def place(cs, text, maxw=7):
+    """Subtitle pieces for one aligned group: text weight is laid over speaking time only, so a long pause
+    inside the group doesn't push the next line early. Each piece starts on speech and ends where the next starts."""
+    pieces = []
+    for ph in [x.strip() for x in re.split(r'(?<=[\.،,!\?؟:…؛])\s+', text) if x.strip()]:
+        words = display(ph).split()
+        if not words: continue
+        n = -(-len(words) // maxw); size = -(-len(words) // n)
+        pieces += [' '.join(words[i:i + size]) for i in range(0, len(words), size)]
+    # merge very short pieces (one or two words) into the previous one when that stays <= maxw + 2 words
+    merged = []
+    for pc in pieces:
+        if merged and len(pc.split()) <= 2 and len(merged[-1].split()) + len(pc.split()) <= maxw + 2: merged[-1] += ' ' + pc
+        else: merged.append(pc)
+    ws = [weight(pc) for pc in merged]; tot = sum(ws); speech = sum(b - a for a, b in cs)
+    def at(x):  # speaking-time offset -> real time; lands on speech, never inside a pause
+        for a0, b0 in cs:
+            if x < b0 - a0 - 1e-6: return a0 + x
+            x -= b0 - a0
+        return cs[-1][1]
+    starts, acc = [], 0.0
+    for w in ws: starts.append(at(acc)); acc += speech * w / tot
+    ends = starts[1:] + [cs[-1][1]]
+    return [(a0, b0, pc) for a0, b0, pc in zip(starts, ends, merged)]
 
 segs, t = [], 0.0          # segs: (wav path, seconds) in order; t = running narration time
 lines, verses, swells, title_gap = [], [], [], None
@@ -87,6 +105,22 @@ def norm(src, dst, lufs):
     g = round(lufs - float(L), 2)
     run('ffmpeg', '-v', 'error', '-y', '-i', src, '-af', f'aresample={SR}:resampler=soxr,volume={g}dB,alimiter=limit=0.89:level=false', '-ac', '2', '-ar', str(SR), '-c:a', 'pcm_s16le', dst)
 
+def ayah_join(src, dst, tail):
+    # everyayah files are cut tight: they start on the first sound and stop while the reverb still rings,
+    # so a plain cut to digital silence sounds chopped. Click-free edge fades, plus a soft echo tail built
+    # from the last 0.25 s that decays across the following gap (`tail` seconds) instead of silence.
+    d = dur(src); w = 0.25; ms = int((d - w) * 1000)
+    fc = (f'[0:a]asplit=2[dry][w];'
+          f'[w]atrim=start={d - w:.3f},asetpts=PTS-STARTPTS,apad=pad_dur={tail:.3f},'
+          f'aecho=0:1:60|130|210|300|410|540:0.42|0.30|0.21|0.14|0.09|0.05,'
+          f'afade=t=in:d=0.05,afade=t=out:st={w:.3f}:d={tail:.3f},adelay={ms}|{ms}[tl];'
+          f'[dry]afade=t=in:d=0.025,afade=t=out:st={d - 0.05:.3f}:d=0.05,apad=pad_dur={tail:.3f}[dd];'
+          f'[dd][tl]amix=inputs=2:normalize=0:duration=first,atrim=end={d + tail:.3f}')
+    run('ffmpeg', '-v', 'error', '-y', '-i', src, '-filter_complex', fc, '-ac', '2', '-ar', str(SR), '-c:a', 'pcm_s16le', dst)
+    return d
+
+trims = json.load(open(f'{D}/trims.json')) if os.path.exists(f'{D}/trims.json') else {}  # {"hash": {"end": sec}}: cut stray words a take added
+
 parts = parse(f'script/{a.ch}.txt', v); prev = None
 for idx, p in enumerate(parts):
     if p['type'] == 'narr':
@@ -94,22 +128,26 @@ for idx, p in enumerate(parts):
         if not os.path.exists(src): sys.exit(f'missing {src}: run tools/tts.py {a.ch} first (or fix picks.json)')
         if prev == 'narr': silence(P['paragraph'])
         f = f'work/asm/n_{p["hash"]}_t{k}.wav'
-        run('ffmpeg', '-v', 'error', '-y', '-i', src, '-ac', '2', '-ar', str(SR), '-c:a', 'pcm_s16le', f)
+        cut = trims.get(p['hash'], {}).get('end', 0)
+        af = ['-af', f'atrim=end={dur(src) - cut:.3f},afade=t=out:st={dur(src) - cut - 0.04:.3f}:d=0.04'] if cut else []
+        run('ffmpeg', '-v', 'error', '-y', '-i', src, *af, '-ac', '2', '-ar', str(SR), '-c:a', 'pcm_s16le', f)
         print(f'narr {p["hash"]} t{k} at {t:.2f}s')
-        for s0, e0, txt in align(f, p['text']):
-            lines += [[round(t + x, 2), round(t + y, 2), z] for x, y, z in split_display(s0, e0, txt)]
+        af_ = f'{D}/anchors/{p["hash"]}_t{k}.json'
+        anc = json.load(open(af_))['starts'] if os.path.exists(af_) else None
+        for cs, txt in align(f, p['text'], anc):
+            lines += [[round(t + x, 2), round(t + y, 2), z] for x, y, z in place(cs, txt)]
         segs.append(f); t += dur(f)
     elif p['type'] == 'ayah':
         silence(P['verseBefore'])
         for n_i, n in enumerate(p['ayat']):
-            if n_i: silence(P['betweenAyat'])
             mp3 = f'sources/quran/audio/{v["reciter"]}/{p["sura"]:03d}{n:03d}.mp3'
             if not os.path.exists(mp3): sys.exit(f'missing {mp3}: run tools/fetch_ayah.py {a.ch}')
-            f = f'work/asm/q_{p["sura"]}_{n}.wav'; norm(mp3, f, -17.0)
+            gap = P['betweenAyat'] if n_i < len(p['ayat']) - 1 else P['verseAfter']
+            q = f'work/asm/qn_{p["sura"]}_{n}.wav'; norm(mp3, q, -17.0)
+            f = f'work/asm/q_{p["sura"]}_{n}.wav'; d = ayah_join(q, f, gap)   # file = ayah + its decaying gap
             txt = json.load(open(f'sources/quran/text/{p["sura"]}_{n}.json', encoding='utf8'))
-            d = dur(f); verses.append({'a': round(t, 2), 'b': round(t + d, 2), 'key': f'{p["sura"]}:{n}', 'ref': f'{txt["sura"]} · {n}', 'text': txt['text']})
-            print(f'ayah {p["sura"]}:{n} at {t:.2f}s ({d:.1f}s)'); segs.append(f); t += d
-        silence(P['verseAfter'])
+            verses.append({'a': round(t, 2), 'b': round(t + d, 2), 'key': f'{p["sura"]}:{n}', 'ref': f'{txt["sura"]} · {n}', 'text': txt['text']})
+            print(f'ayah {p["sura"]}:{n} at {t:.2f}s ({d:.1f}s)'); segs.append(f); t += dur(f)
     elif p['type'] == 'title':
         title_gap = round(t + 0.3, 2); silence(v['titleDur'] + 0.6)
     elif p['type'] == 'pause':

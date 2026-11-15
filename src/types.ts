@@ -29,6 +29,10 @@ export type Chapter = {
   swells?: Range[];       // narration-relative ranges where music rises (pauses, title gap)
   outro?: {at: number; text: string; sub?: string};   // absolute; end card
   thumb?: {bg: string; text: string; sub?: string};   // YouTube thumbnail still (1280x720)
+  credits?: Credits;      // movie-style end roll after the outro
   shots: Shot[]; lines: Line[]; verses: Verse[]; locations: Location[]; cues: Cue[];
 };
+export type CreditSection = {h: string; rows?: [string, string][]; text?: string[]};
+export type Credits = {at: number; dur: number; bg?: string; head?: {label?: string; title: string; sub?: string};
+  sections: CreditSection[]; end?: {text: string; sub?: string; small?: string}};
 export type ShortClip = {id: string; chapter: string; from: number; to: number; hook?: string};
