@@ -5,3 +5,7 @@ work/
 sfx_parts/
 sources/quran/audio/
 *.zip
+__pycache__/
+public/*/narration.wav
+public/*/music.wav
+public/*/sfx.wav

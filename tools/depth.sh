@@ -8,8 +8,8 @@ for img in "$@"; do
   [ -f "$out" ] && { echo "skip $out"; continue; }
   for try in 1 2 3; do
     w="$PWD/work/depth/${name}_$try"; mkdir -p "$w"
-    "$KAPI" gen --model gemini-nano-banana-2.1 --file "$img" --out "$w" --wait-s 180 --request-id "depth-$(basename "$PWD")-$name-$(md5sum "$img" | cut -c1-8)-$try" "$P Reference $name." 2>&1 | head -1 | grep -oE '"status":"[a-z]+"' 
-    f=$(find "$w" -type f \( -name '*.png' -o -name '*.jpg' -o -name '*.webp' \) | head -1)
+    "$KAPI" gen --model "${DEPTH_MODEL:-gemini-nano-banana-2.1}" --file "$img" --out "$w" --wait-s 900 --request-id "depth-${DEPTH_MODEL:-nb}-$(basename "$PWD")-$name-$(md5sum "$img" | cut -c1-8)-$try" "$P Reference $name." > "$w.gen.log" 2>&1; grep -oE '"status":"[a-z]+"' "$w.gen.log" | tail -1
+    f=$(find "$w" -type f -name 'output-*' | head -1)  # never the error screenshot.png
     if [ -n "$f" ]; then ffmpeg -v error -y -i "$f" -vf "scale=1920:1080,format=gray,gblur=sigma=3" "$out" && echo "ok $out" && break; fi
     echo "retry $name ($try)"; sleep 4
   done

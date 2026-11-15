@@ -119,6 +119,7 @@ for idx, p in enumerate(parts):
 lst = 'work/asm/list.txt'
 open(lst, 'w').write(''.join(f"file '{os.path.abspath(s)}'\n" for s in segs))
 run('ffmpeg', '-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', lst, '-c:a', 'pcm_s16le', '-ar', str(SR), '-ac', '2', f'{OUT}/narration.wav')
+run('ffmpeg', '-v', 'error', '-y', '-i', f'{OUT}/narration.wav', '-c:a', 'libmp3lame', '-b:a', '320k', f'{OUT}/narration.mp3')  # the render uses this (wav is too big for GitHub)
 nd = round(dur(f'{OUT}/narration.wav'), 2)
 json.dump({'narrDur': nd, 'titleGap': title_gap, 'swells': swells, 'lines': lines, 'verses': verses},
           open(f'{OUT}/lines.json', 'w', encoding='utf8'), ensure_ascii=False, indent=1)

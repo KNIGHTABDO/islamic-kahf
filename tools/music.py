@@ -22,4 +22,5 @@ else:
     fc += f'{prev}aformat=sample_rates=48000:channel_layouts=stereo[m]'
 fc += f';[m]atrim=0:{total},afade=t=out:st={total - 3}:d=3[o]'
 subprocess.run(['ffmpeg', '-v', 'error', '-y', *args, '-filter_complex', fc, '-map', '[o]', '-c:a', 'pcm_s16le', f'public/{ch}/music.wav'], check=True)
-print(f'public/{ch}/music.wav {total:.1f}s from {len(seq)} pieces')
+subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', f'public/{ch}/music.wav', '-c:a', 'libmp3lame', '-b:a', '320k', f'public/{ch}/music.mp3'], check=True)  # plan uses music.mp3 (wav too big for GitHub)
+print(f'public/{ch}/music.wav (+ music.mp3) {total:.1f}s from {len(seq)} pieces')
