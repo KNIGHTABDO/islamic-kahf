@@ -41,6 +41,7 @@ if plan.get('outro'):
     outro = {'at': oat, 'text': o['text'], **({'sub': o['sub']} if o.get('sub') else {})}
 if outro: TOTAL = round(outro['at'] + plan['outro'].get('dur', 4.5), 2)
 credits = None
+if not plan.get('credits'): print('warning: no credits block in the plan; every chapter ends with the end credits (see examples/ch01.plan.json)')
 if plan.get('credits'):   # movie-style end roll after the outro card (overlaps its last second)
     credits = {k: v for k, v in plan['credits'].items() if k != 'stats'}; credits['at'] = round(TOTAL - 1.0, 2)
     credits['dur'] = plan['credits'].get('dur', 45); TOTAL = round(credits['at'] + credits['dur'], 2)
