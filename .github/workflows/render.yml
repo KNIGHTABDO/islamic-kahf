@@ -1,4 +1,5 @@
 name: Render
+# Sharded Remotion render: 40 workers, join, 720p review copy and thumbnail.
 on:
   workflow_dispatch:
     inputs:
