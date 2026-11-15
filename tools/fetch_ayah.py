@@ -1,8 +1,8 @@
 """Download what every @ayah marker in script/chXX.txt needs: the real recitation (everyayah.com) and the
 Uthmani text (alquran.cloud). Optional --tafsir saves Ibn Kathir (Arabic, quran.com tafsir id 14) for fact-checking.
-Usage: python3 tools/fetch_ayah.py ch01 [--tafsir]     Reciter: voice.json "reciter" (an everyayah.com folder name).
+Usage: python3 tools/fetch_ayah.py ch01 [--tafsir]     Reciter: voice.json "reciter": an everyayah.com folder name, or "local:<name>" for licensed files in sources/quran/licensed/<name>/SSSAAA.mp3.
 Files: sources/quran/audio/<reciter>/SSSAAA.mp3 (gitignored), sources/quran/text/S_A.json, sources/quran/tafsir/S_A.json"""
-import argparse, json, os, sys, time, urllib.request
+import argparse, json, os, shutil, sys, time, urllib.request
 sys.path.insert(0, os.path.dirname(__file__))
 from parts import load_voice, parse
 
@@ -23,7 +23,12 @@ for p in parse(f'script/{a.ch}.txt', v):
     s = p['sura']
     for n in p['ayat']:
         mp3 = f'sources/quran/audio/{rec}/{s:03d}{n:03d}.mp3'
-        if not os.path.exists(mp3): open(mp3, 'wb').write(get(f'https://everyayah.com/data/{rec}/{s:03d}{n:03d}.mp3'))
+        if os.path.exists(mp3): pass
+        elif rec.startswith('local:'):   # licensed recordings you own or have written permission for (see reference/recitation-rights.md)
+            src = f"sources/quran/licensed/{rec[6:]}/{s:03d}{n:03d}.mp3"
+            if not os.path.exists(src): sys.exit(f'missing licensed recitation {src}')
+            shutil.copy(src, mp3)
+        else: open(mp3, 'wb').write(get(f'https://everyayah.com/data/{rec}/{s:03d}{n:03d}.mp3'))
         tj = f'sources/quran/text/{s}_{n}.json'
         if not os.path.exists(tj):
             d = json.loads(get(f'https://api.alquran.cloud/v1/ayah/{s}:{n}/quran-uthmani'))['data']
